@@ -1,3 +1,10 @@
+#!/usr/bin/env rake
+begin
+  require 'bundler/setup'
+  require 'appraisal'
+rescue LoadError
+  puts 'You must `gem install bundler` and `bundle install` to run rake tasks'
+end
 require 'bundler/gem_tasks'
 require 'rspec/core/rake_task'
 
@@ -17,6 +24,7 @@ namespace :spec do
     spec.pattern = 'spec/integration/*_spec.rb'
     spec.rspec_opts = ['--backtrace']
   end
+  desc "run spec:unit and spec:integration tasks"
   task :all do
     Rake::Task['spec:unit'].execute
 

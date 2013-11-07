@@ -9,6 +9,7 @@ module AssetSync
     attr_accessor :gzip_compression
     attr_accessor :manifest
     attr_accessor :fail_silently
+    attr_accessor :log_silently
     attr_accessor :always_upload
     attr_accessor :always_upload_all
     attr_accessor :warn_on_failure
@@ -18,6 +19,8 @@ module AssetSync
     attr_accessor :enabled
     attr_accessor :custom_headers
     attr_accessor :run_on_precompile
+    attr_accessor :invalidate
+    attr_accessor :cdn_distribution_id
 
 
     # FOG configuration
@@ -52,6 +55,7 @@ module AssetSync
       self.gzip_compression = false
       self.manifest = false
       self.fail_silently = false
+      self.log_silently = true
       self.always_upload = []
       self.always_upload_all = false
       self.ignored_files = []
@@ -61,6 +65,8 @@ module AssetSync
       self.rackspace_allow_origin = ""
       self.rackspace_origin = ""
       self.run_on_precompile = true
+      self.cdn_distribution_id = nil
+      self.invalidate = []
       load_yml! if defined?(Rails) && yml_exists?
     end
 
@@ -88,6 +94,10 @@ module AssetSync
 
     def fail_silently?
       fail_silently || !enabled?
+    end
+
+    def log_silently?
+      ENV['RAILS_GROUPS'] == 'assets' || self.log_silently == false
     end
 
     def enabled?
@@ -152,6 +162,8 @@ module AssetSync
       self.ignored_files          = yml["ignored_files"] if yml.has_key?("ignored_files")
       self.custom_headers          = yml["custom_headers"] if yml.has_key?("custom_headers")
       self.run_on_precompile      = yml["run_on_precompile"] if yml.has_key?("run_on_precompile")
+      self.invalidate             = yml["invalidate"] if yml.has_key?("invalidate")
+      self.cdn_distribution_id    = yml['cdn_distribution_id'] if yml.has_key?("cdn_distribution_id")
 
       # TODO deprecate the other old style config settings. FML.
       self.aws_access_key_id      = yml["aws_access_key"] if yml.has_key?("aws_access_key")
@@ -164,6 +176,8 @@ module AssetSync
       self.aws_secret_access_key  = yml["secret_access_key"] if yml.has_key?("secret_access_key")
       self.fog_directory          = yml["bucket"] if yml.has_key?("bucket")
       self.fog_region             = yml["region"] if yml.has_key?("region")
+
+      self.public_path            = yml["public_path"] if yml.has_key?("public_path")
     end
 
 
@@ -179,6 +193,9 @@ module AssetSync
           :rackspace_username => rackspace_username,
           :rackspace_api_key => rackspace_api_key
         })
+        options.merge!({
+          :rackspace_region => fog_region
+        }) if fog_region
         options.merge!({ :rackspace_auth_url => rackspace_auth_url }) if rackspace_auth_url
       elsif google?
         options.merge!({
@@ -189,7 +206,7 @@ module AssetSync
         raise ArgumentError, "AssetSync Unknown provider: #{fog_provider} only AWS and Rackspace are supported currently."
       end
 
-      options.merge!({:region => fog_region}) if fog_region
+      options.merge!({:region => fog_region}) if fog_region && !rackspace?
       return options
     end
 
