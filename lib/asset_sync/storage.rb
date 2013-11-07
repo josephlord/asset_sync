@@ -1,7 +1,9 @@
 module AssetSync
   class Storage
+    REGEXP_FINGERPRINTED_FILES = /^(.*)\/([^-]+)-[^\.]+\.([^\.]+)$/
 
-    class BucketNotFound < StandardError; end
+    class BucketNotFound < StandardError;
+    end
 
     attr_accessor :config
 
@@ -34,23 +36,23 @@ module AssetSync
       files = []
       Array(self.config.ignored_files).each do |ignore|
         case ignore
-        when Regexp
-          files += self.local_files.select do |file|
-            file =~ ignore
-          end
-        when String
-          files += self.local_files.select do |file|
-            file.split('/').last == ignore
-          end
-        else
-          log "Error: please define ignored_files as string or regular expression. #{ignore} (#{ignore.class}) ignored."
+          when Regexp
+            files += self.local_files.select do |file|
+              file =~ ignore
+            end
+          when String
+            files += self.local_files.select do |file|
+              file.split('/').last == ignore
+            end
+          else
+            log "Error: please define ignored_files as string or regular expression. #{ignore} (#{ignore.class}) ignored."
         end
       end
       files.uniq
     end
 
     def local_files
-      @local_files ||= get_local_files
+      @local_files ||= get_local_files.uniq
     end
 
     def always_upload_files
@@ -61,14 +63,30 @@ module AssetSync
       self.config.custom_headers.inject({}) { |h,(k, v)| h[File.join(self.config.assets_prefix, k)] = v; h; }
     end
 
+    def files_to_invalidate
+      self.config.invalidate.map { |filename| File.join("/", self.config.assets_prefix, filename) }
+    end
+
     def get_local_files
       if self.config.manifest
-        if File.exists?(self.config.manifest_path)
-          yml = YAML.load(IO.read(self.config.manifest_path))
+        if ActionView::Base.respond_to?(:assets_manifest)
+          log "Using: Rails 4.0 manifest access"
+          manifest = Sprockets::Manifest.new(ActionView::Base.assets_manifest.environment, ActionView::Base.assets_manifest.dir)
+          return manifest.assets.values.map { |f| File.join(self.config.assets_prefix, f) }
+        elsif File.exists?(self.config.manifest_path)
           log "Using: Manifest #{self.config.manifest_path}"
-          return yml.values.map { |f| File.join(self.config.assets_prefix, f) }
+          yml = YAML.load(IO.read(self.config.manifest_path))
+   
+          return yml.map do |original, compiled|
+            # Upload font originals and compiled
+            if original =~ /^.+(eot|svg|ttf|woff)$/
+              [original, compiled]
+            else
+              compiled
+            end
+          end.flatten.map { |f| File.join(self.config.assets_prefix, f) }.uniq!
         else
-          log "Warning: manifest.yml not found at #{self.config.manifest_path}"
+          log "Warning: Manifest could not be found"
         end
       end
       log "Using: Directory Search of #{path}/#{self.config.assets_prefix}"
@@ -97,7 +115,7 @@ module AssetSync
       log "Fetching files to flag for delete"
       remote_files = get_remote_files
       # fixes: https://github.com/rumblelabs/asset_sync/issues/19
-      from_remote_files_to_delete = remote_files - local_files - ignored_files
+      from_remote_files_to_delete = remote_files - local_files - ignored_files - always_upload_files
 
       log "Flagging #{from_remote_files_to_delete.size} file(s) for deletion"
       # Delete unneeded remote files
@@ -126,10 +144,19 @@ module AssetSync
       end
 
       # overwrite headers if applicable, you probably shouldn't specific key/body, but cache-control headers etc.
+
       if files_with_custom_headers.has_key? f
         file.merge! files_with_custom_headers[f]
         log "Overwriting #{f} with custom headers #{files_with_custom_headers[f].to_s}"
+      elsif key = self.config.custom_headers.keys.detect {|k| f.match(Regexp.new(k))}
+        headers = {}
+        self.config.custom_headers[key].each do |key, value|
+          headers[key.to_sym] = value
+        end
+        file.merge! headers
+        log "Overwriting matching file #{f} with custom headers #{headers.to_s}"
       end
+
 
       gzipped = "#{path}/#{f}.gz"
       ignore = false
@@ -153,15 +180,15 @@ module AssetSync
         ignore = true
       elsif config.gzip? && File.exists?(gzipped)
         original_size = File.size("#{path}/#{f}")
-        gzipped_size  = File.size(gzipped)
+        gzipped_size = File.size(gzipped)
 
         if gzipped_size < original_size
           percentage = ((gzipped_size.to_f/original_size.to_f)*100).round(2)
           file.merge!({
-            :key => f,
-            :body => File.open(gzipped),
-            :content_encoding => 'gzip'
-          })
+                        :key => f,
+                        :body => File.open(gzipped),
+                        :content_encoding => 'gzip'
+                      })
           log "Uploading: #{gzipped} in place of #{f} saving #{percentage}%"
         else
           percentage = ((original_size.to_f/gzipped_size.to_f)*100).round(2)
@@ -192,12 +219,11 @@ module AssetSync
     end
 
     def upload_files
-      local_files_to_upload = local_files - ignored_files
-      unless config.always_upload_all
-        # get a fresh list of remote files
-        remote_files = ignore_existing_remote_files? ? [] : get_remote_files
-        local_files_to_upload = local_files_to_upload - remote_files + always_upload_files
-      end
+      # get a fresh list of remote files
+      remote_files = ignore_existing_remote_files? ? [] : get_remote_files
+      # fixes: https://github.com/rumblelabs/asset_sync/issues/19
+      local_files_to_upload = local_files - ignored_files - remote_files + always_upload_files
+      local_files_to_upload = (local_files_to_upload + get_non_fingerprinted(local_files_to_upload)).uniq
 
       # Upload new files
       local_files_to_upload.each do |f|
@@ -208,6 +234,13 @@ module AssetSync
           log "error -  #{$!} - file: #{f}"
           raise ex unless config.warn_on_failure
         end
+      end
+
+      if self.config.cdn_distribution_id && files_to_invalidate.any?
+        log "Invalidating Files"
+        cdn ||= Fog::CDN.new(self.config.fog_options.except(:region))
+        data = cdn.post_invalidation(self.config.cdn_distribution_id, files_to_invalidate)
+        log "Invalidation id: #{data.body["Id"]}"
       end
     end
 
@@ -224,5 +257,13 @@ module AssetSync
     def ignore_existing_remote_files?
       self.config.existing_remote_files == 'ignore'
     end
+
+    def get_non_fingerprinted(files)
+      files.map do |file|
+        match_data = file.match(REGEXP_FINGERPRINTED_FILES)
+        match_data && "#{match_data[1]}/#{match_data[2]}.#{match_data[3]}"
+      end.compact
+    end
+
   end
 end

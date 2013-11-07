@@ -61,6 +61,18 @@ describe AssetSync do
     it "should default manifest to false" do
       AssetSync.config.manifest.should be_false
     end
+
+    it "should default log_silently to true" do
+      AssetSync.config.log_silently.should be_true
+    end
+
+    it "should default cdn_distribution_id to nil" do
+      AssetSync.config.cdn_distribution_id.should be_nil
+    end
+
+    it "should default invalidate to empty array" do
+      AssetSync.config.invalidate.should == []
+    end
   end
 
   describe 'from yml' do
@@ -115,7 +127,7 @@ describe AssetSync do
     end
 
     it "should be disabled" do
-      lambda{ AssetSync.sync }.should_not raise_error(AssetSync::Config::Invalid)
+      expect{ AssetSync.sync }.not_to raise_error()
     end
 
     after(:each) do
@@ -129,7 +141,7 @@ describe AssetSync do
     end
 
     it "should be invalid" do
-      lambda{ AssetSync.sync }.should raise_error(AssetSync::Config::Invalid)
+      expect{ AssetSync.sync }.to raise_error()
     end
   end
 
@@ -142,7 +154,7 @@ describe AssetSync do
     end
 
     it "should do nothing, without complaining" do
-      lambda{ AssetSync.sync }.should_not raise_error(AssetSync::Config::Invalid)
+      expect{ AssetSync.sync }.not_to raise_error()
     end
   end
 
@@ -156,7 +168,7 @@ describe AssetSync do
     end
 
     it "should not raise an invalid exception" do
-      lambda{ AssetSync.sync }.should_not raise_error(AssetSync::Config::Invalid)
+      expect{ AssetSync.sync }.not_to raise_error()
     end
 
     it "should output a warning to stderr" do
@@ -175,7 +187,7 @@ describe AssetSync do
     end
 
     it "should not raise an invalid exception" do
-      lambda{ AssetSync.sync }.should_not raise_error(AssetSync::Config::Invalid)
+      lambda{ AssetSync.sync }.should_not raise_error()
     end
   end
 
@@ -227,7 +239,7 @@ describe AssetSync do
     end
 
     it "should raise a config invalid error" do
-      lambda{ AssetSync.sync }.should raise_error(AssetSync::Config::Invalid)
+      expect{ AssetSync.sync }.to raise_error()
     end
 
 

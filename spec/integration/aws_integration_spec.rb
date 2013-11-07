@@ -23,6 +23,17 @@ describe "AssetSync" do
     @prefix = SecureRandom.hex(6)
   end
 
+  let(:app_js_regex){ 
+    /#{@prefix}\/application-[a-zA-Z0-9]*.js$/ 
+  }
+
+  let(:app_js_gz_regex){ 
+    /#{@prefix}\/application-[a-zA-Z0-9]*.js.gz$/ 
+  }
+
+  let(:files){ bucket(@prefix).files }
+
+
   after(:each) do
     @directory = bucket(@prefix)
     @directory.files.each do |f|
@@ -31,13 +42,23 @@ describe "AssetSync" do
   end
 
   it "sync" do
+<<<<<<< HEAD
     execute "rake FOG_PROVIDER=AWS ASSET_SYNC_PREFIX=#{@prefix} assets:precompile"
     bucket(@prefix).files.size.should == 5
+=======
+    execute "rake ASSET_SYNC_PREFIX=#{@prefix} assets:precompile"
+    # bucket(@prefix).files.size.should == 5
 
-    app_js = bucket(@prefix).files.get("#{@prefix}/application.js")
+    files = bucket(@prefix).files
+
+    app_js_path = files.select{ |f| f.key =~ app_js_regex }.first
+    app_js_gz_path = files.select{ |f| f.key =~ app_js_gz_regex }.first
+>>>>>>> b0eee248224ae0e58bf6a5bf60aba1725279caee
+
+    app_js = files.get( app_js_path.key )
     app_js.content_type.should == "text/javascript"
 
-    app_js_gz = bucket(@prefix).files.get("#{@prefix}/application.js.gz")
+    app_js_gz = files.get( app_js_gz_path.key )
     app_js_gz.content_type.should == "text/javascript"
     app_js_gz.content_encoding.should == "gzip"
   end
@@ -48,10 +69,16 @@ describe "AssetSync" do
   end
 
   it "sync with gzip_compression=true" do
+<<<<<<< HEAD
     execute "rake FOG_PROVIDER=AWS ASSET_SYNC_PREFIX=#{@prefix} ASSET_SYNC_GZIP_COMPRESSION=true assets:precompile"
     bucket(@prefix).files.size.should == 3
+=======
+    execute "rake ASSET_SYNC_PREFIX=#{@prefix} ASSET_SYNC_GZIP_COMPRESSION=true assets:precompile"
+    # bucket(@prefix).files.size.should == 3
+>>>>>>> b0eee248224ae0e58bf6a5bf60aba1725279caee
 
-    app_js = bucket(@prefix).files.get("#{@prefix}/application.js")
+    app_js_path = files.select{ |f| f.key =~ app_js_regex }.first
+    app_js = files.get( app_js_path.key )
     app_js.content_type.should == "text/javascript"
   end
 

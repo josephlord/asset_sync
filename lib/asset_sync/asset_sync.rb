@@ -11,6 +11,10 @@ module AssetSync
       @config
     end
 
+    def reset_config!
+      remove_instance_variable :@config if defined?(@config)
+    end
+
     def configure(&proc)
       @config ||= Config.new
       yield @config
@@ -21,6 +25,18 @@ module AssetSync
     end
 
     def sync
+      with_config do
+        self.storage.sync
+      end
+    end
+
+    def clean
+      with_config do
+        self.storage.delete_extra_remote_files
+      end
+    end
+
+    def with_config(&block)
       return unless AssetSync.enabled?
 
       errors = config.valid? ? "" : config.errors.full_messages.join(', ')
@@ -32,7 +48,7 @@ module AssetSync
           raise Config::Invalid.new(errors)
         end
       else
-        self.storage.sync
+        block.call
       end
     end
 
@@ -41,7 +57,7 @@ module AssetSync
     end
 
     def log(msg)
-      stdout.puts msg if ENV["RAILS_GROUPS"] == "assets"
+      stdout.puts msg if config.log_silently?
     end
 
     def enabled?
